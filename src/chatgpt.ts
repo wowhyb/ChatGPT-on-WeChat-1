@@ -1,8 +1,8 @@
 import { Config } from "./config.js";
-import { Message } from "wechaty";
+import { Message, } from "wechaty";
 import { ContactInterface, RoomInterface } from "wechaty/impls";
 import { Configuration, OpenAIApi } from "openai";
-
+import { FileBox } from 'file-box'
 // ChatGPT error response configuration
 const chatgptErrorMessage = "🤖️：AI机器人摆烂了，请稍后再试～";
 
@@ -10,10 +10,12 @@ const chatgptErrorMessage = "🤖️：AI机器人摆烂了，请稍后再试～
 // please refer to the OpenAI API doc: https://beta.openai.com/docs/api-reference/introduction
 const ChatGPTModelConfig = {
   // this model field is required
-  model: "text-davinci-003",
-  // add your ChatGPT model parameters below
-  temperature: 0.3,
-  max_tokens: 2000,
+  model: 'text-davinci-003',
+  temperature: 0.9,
+  max_tokens: 4000,
+  top_p: 1,
+  frequency_penalty: 0.0,
+  presence_penalty: 0.6
 };
 
 // message size for a single reply by the bot
@@ -42,6 +44,7 @@ enum MessageType {
 export class ChatGPTBot {
   botName: string = "";
   chatgptTriggerKeyword = Config.chatgptTriggerKeyword;
+  chatgptTriggerImgKeyword = Config.chatgptTriggerImgKeyword;
   OpenAIConfig: any; // OpenAI API key
   OpenAI: any; // OpenAI API instance
 
@@ -57,6 +60,10 @@ export class ChatGPTBot {
   // get trigger keyword in group chat: (@Name <keyword>)
   get chatGroupTriggerKeyword(): string {
     return `@${this.botName} ${this.chatgptTriggerKeyword || ""}`;
+  }
+
+  get chatGroupTriggerImgKeyword(): string {
+    return `@${this.botName} ${this.chatgptTriggerImgKeyword || ""}`;
   }
 
   // configure API with model API keys and run an initial test
@@ -95,6 +102,34 @@ export class ChatGPTBot {
     return text;
   }
 
+  cleanMessageByImg(rawText: string, isPrivateChat: boolean = false): string {
+    let text = rawText;
+    const item = rawText.split("- - - - - - - - - - - - - - -");
+    if (item.length > 1) {
+      text = item[item.length - 1];
+    }
+    text = text.replace(
+      isPrivateChat ? this.chatgptTriggerImgKeyword : this.chatGroupTriggerImgKeyword,
+      ""
+    );
+    return text;
+  }
+
+  pdMeessageByImg(rawText: string, isPrivateChat: boolean = false): number {
+    const chatgptTriggerKeyword = this.chatgptTriggerKeyword;
+    const chatgptTriggerImgKeyword = this.chatgptTriggerImgKeyword;
+    let triggered: number = 0
+    if (isPrivateChat && rawText) {
+      triggered = rawText.startsWith(chatgptTriggerKeyword)
+        ? 1
+        : rawText.startsWith(chatgptTriggerImgKeyword) ? 2 : 0;
+    } else {
+      triggered = rawText.startsWith(this.chatGroupTriggerKeyword) ? 1 : rawText.startsWith(this.chatGroupTriggerImgKeyword) ? 2 : 0;
+    }
+    return triggered
+  }
+
+
   // check whether ChatGPT bot can be triggered
   triggerGPTMessage(text: string, isPrivateChat: boolean = false): boolean {
     const chatgptTriggerKeyword = this.chatgptTriggerKeyword;
@@ -105,6 +140,23 @@ export class ChatGPTBot {
         : true;
     } else {
       triggered = text.startsWith(this.chatGroupTriggerKeyword);
+    }
+    if (triggered) {
+      console.log(`🎯 Chatbot triggered: ${text}`);
+    }
+    return triggered;
+  }
+
+  // check whether ChatGPT bot can be triggered
+  triggerGPTMessageByImg(text: string, isPrivateChat: boolean = false): boolean {
+    const chatgptTriggerImgKeyword = this.chatgptTriggerImgKeyword;
+    let triggered = false;
+    if (isPrivateChat) {
+      triggered = chatgptTriggerImgKeyword
+        ? text.startsWith(chatgptTriggerImgKeyword)
+        : true;
+    } else {
+      triggered = text.startsWith(this.chatGroupTriggerImgKeyword);
     }
     if (triggered) {
       console.log(`🎯 Chatbot triggered: ${text}`);
@@ -156,6 +208,32 @@ export class ChatGPTBot {
     }
   }
 
+  // send question to ChatGPT with OpenAI API and get answer
+  async onChatGPTByImg(text: string): Promise<string> {
+    const inputMessage = this.applyContext(text);
+    try {
+      // config OpenAI API request body
+      const response = await this.OpenAI.createImage({
+        n: 1,
+        size: "1024x1024",
+        prompt: inputMessage,
+      });
+      // use OpenAI API to get ChatGPT reply message
+      const chatgptReplyMessage = response.data.data[0].url;
+      console.log(response.data)
+      console.log("🤖️ Chatbot says: ", chatgptReplyMessage);
+      return chatgptReplyMessage;
+    } catch (e: any) {
+      const errorResponse = e?.response;
+      const errorCode = errorResponse?.status;
+      const errorStatus = errorResponse?.statusText;
+      const errorMessage = errorResponse?.data?.error?.message;
+      console.error(`❌ Code ${errorCode}: ${errorStatus}`);
+      console.error(`❌ ${errorMessage}`);
+      return chatgptErrorMessage;
+    }
+  }
+
   // reply with the segmented messages from a single-long message
   async reply(
     talker: RoomInterface | ContactInterface,
@@ -171,6 +249,21 @@ export class ChatGPTBot {
     for (const msg of messages) {
       await talker.say(msg);
     }
+  }
+
+  async replyByImg(
+    talker: RoomInterface | ContactInterface,
+    mesasge: string
+  ): Promise<void> {
+    const img = FileBox.fromUrl(mesasge)
+    console.log(img)
+    await talker.say(mesasge);
+    try {
+      await talker.say(img);
+    } catch (e: any) {
+      console.error(`${e}`);
+    }
+
   }
 
   // reply to private message
@@ -190,6 +283,25 @@ export class ChatGPTBot {
     await this.reply(room, result);
   }
 
+
+  // reply to private message
+  async onPrivateMessageByImg(talker: ContactInterface, text: string) {
+    // get reply from ChatGPT
+    const chatgptReplyMessage = await this.onChatGPTByImg(text);
+    // send the ChatGPT reply to chat
+    await this.replyByImg(talker, chatgptReplyMessage);
+  }
+
+  // reply to group message
+  async onGroupMessageByImg(room: RoomInterface, text: string) {
+    // get reply from ChatGPT
+    const chatgptReplyMessage = await this.onChatGPTByImg(text);
+    // the reply consist of: original text and bot reply
+    const result = `${text}\n ---------- \n ${chatgptReplyMessage}`;
+    await this.replyByImg(room, result);
+  }
+
+
   // receive a message (main entry)
   async onMessage(message: Message) {
     const talker = message.talker();
@@ -197,22 +309,39 @@ export class ChatGPTBot {
     const room = message.room();
     const messageType = message.type();
     const isPrivateChat = !room;
+    let isimgmsg = false;
+    console.log(talker)
+    console.log(room)
+    console.log(rawText)
     // do nothing if the message:
     //    1. is irrelevant (e.g. voice, video, location...), or
     //    2. doesn't trigger bot (e.g. wrong trigger-word)
     if (
       this.isNonsense(talker, messageType, rawText) ||
-      !this.triggerGPTMessage(rawText, isPrivateChat)
+      (!this.triggerGPTMessage(rawText, isPrivateChat) && !this.triggerGPTMessageByImg(rawText, isPrivateChat))
     ) {
       return;
     }
+    console.log('startchat')
     // clean the message for ChatGPT input
-    const text = this.cleanMessage(rawText, isPrivateChat);
+    let text = this.cleanMessage(rawText, isPrivateChat);
+    console.log(text)
+    let s = this.pdMeessageByImg(rawText, isPrivateChat);
+    console.log(s)
     // reply to private or group chat
-    if (isPrivateChat) {
-      return await this.onPrivateMessage(talker, text);
-    } else {
-      return await this.onGroupMessage(room, text);
+    if (s === 1) {
+      if (isPrivateChat) {
+        return await this.onPrivateMessage(talker, text);
+      } else {
+        return await this.onGroupMessage(room, text);
+      }
+    } else if (s === 2) {
+      if (isPrivateChat) {
+        return await this.onPrivateMessageByImg(talker, text);
+      } else {
+        return await this.onGroupMessageByImg(room, text);
+      }
     }
+
   }
 }

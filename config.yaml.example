@@ -1,3 +1,4 @@
 openaiApiKey: "sk-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 openaiOrganizationID: "org-XXXXXXXXXXXXXXX"
 chatgptTriggerKeyword: "Hi bot:"
+chatgptTriggerImgKeyword: "Hi bot1:"
