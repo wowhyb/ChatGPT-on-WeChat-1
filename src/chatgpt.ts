@@ -12,7 +12,7 @@ const ChatGPTModelConfig = {
   // this model field is required
   model: 'text-davinci-003',
   temperature: 0.9,
-  max_tokens: 4000,
+  max_tokens: 4096,
   top_p: 1,
   frequency_penalty: 0.0,
   presence_penalty: 0.6
@@ -253,17 +253,29 @@ export class ChatGPTBot {
 
   async replyByImg(
     talker: RoomInterface | ContactInterface,
-    mesasge: string
+    mesasge: string,
+    msg: any = false
   ): Promise<void> {
-    const img = FileBox.fromUrl(mesasge)
-    console.log(img)
-    await talker.say(mesasge);
-    try {
-      await talker.say(img);
-    } catch (e: any) {
-      console.error(`${e}`);
+    if (msg) {
+      const result = `${msg}\n ---------- \n ${mesasge}`;
+      await talker.say(result);
+      const img = FileBox.fromUrl(mesasge)
+      console.log(img)
+      try {
+        await talker.say(img);
+      } catch (e: any) {
+        console.error(`${e}`);
+      }
+    } else {
+      await talker.say(mesasge);
+      const img = FileBox.fromUrl(mesasge)
+      console.log(img)
+      try {
+        await talker.say(img);
+      } catch (e: any) {
+        console.error(`${e}`);
+      }
     }
-
   }
 
   // reply to private message
@@ -298,7 +310,7 @@ export class ChatGPTBot {
     const chatgptReplyMessage = await this.onChatGPTByImg(text);
     // the reply consist of: original text and bot reply
     const result = `${text}\n ---------- \n ${chatgptReplyMessage}`;
-    await this.replyByImg(room, result);
+    await this.replyByImg(room, chatgptReplyMessage, text);
   }
 
 
